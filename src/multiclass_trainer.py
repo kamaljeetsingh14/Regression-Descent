@@ -222,6 +222,7 @@ class Trainer:
                     if flag:
                         R_k = y_batch - model_ibr(X_batch) #torch.func.functional_call(model, dict(parameters), X)  # calculate R_k
                         R_k = R_k.detach()
+                        residuals.append(R_k)
                     I = lambdaa*torch.eye(n, device=D_k.device).unsqueeze(2).expand(n, n, C)    # [n, n, C]
                     G_new = G + I  # [1, 3, 3]  broadcasted
                     G_batch = G_new.permute(2, 0, 1)  # [C, n, n] → suitable for batch inversion
@@ -253,7 +254,8 @@ class Trainer:
                     
 
 
-                    if itr > 0:
+                    if itr > 1:
+                        print("itr",itr)
 
                         R_k_PLUS_1 = y_next.to(device) - model_ibr(X_next.to(device)) #torch.func.functional_call(model, dict(parameters), X)  # calculate R_k
                     
@@ -292,12 +294,12 @@ class Trainer:
                                 #print("there")    
                                 lambdaa = lambdaa*nu
                             
-                            tr = self.evaluate(model_ibr,train_loader,device)
+                            #tr = self.evaluate(model_ibr,train_loader,device)
                             tes = self.evaluate(model_ibr,val_loader,device)
 
-                            MSE.append(tr[0])
+                            #MSE.append(tr[0])
                             MSE_val.append(tes[0])  
-                            train_acc.append(tr[1])
+                            #train_acc.append(tr[1])
                             val_acc.append(tes[1])
                             times.append(time.time() - start_time)
                                 
@@ -346,12 +348,12 @@ class Trainer:
                                 for src_param, tgt_param in zip(parameters, model_ibr.parameters()):
                                     tgt_param.copy_(src_param)
 
-                            tr = self.evaluate(model_ibr,train_loader,device)
+                            #tr = self.evaluate(model_ibr,train_loader,device)
                             tes = self.evaluate(model_ibr,val_loader,device)
 
-                            MSE.append(tr[0])
+                            #MSE.append(tr[0])
                             MSE_val.append(tes[0])  
-                            train_acc.append(tr[1])
+                            #train_acc.append(tr[1])
                             val_acc.append(tes[1])
                             times.append(time.time() - start_time)
                             
@@ -362,18 +364,20 @@ class Trainer:
                     
                     if itr > max_iter:
                         break
-                    if MSE[-1] < 0.01: #and train_acc[-1] > 0.95:
-                        print('Early stopping triggered.')
-                        break
+                    # if MSE[-1] < 0.01: #and train_acc[-1] > 0.95:
+                    #     print('Early stopping triggered.')
+                    #     break
                     itr+=1
                     
                     
                     
                     
                 #lambdaa = lambdaa*(k+2)  
-                if MSE[-1] < 0.01 and train_acc[-1] > 0.95:
-                    break
-            return model_ibr,MSE, MSE_val,train_acc,val_acc, times, lm
+                # if MSE[-1] < 0.01 and train_acc[-1] > 0.95:
+                #     break
+                print(MSE_val)
+                print(val_acc)
+            return model_ibr,MSE, MSE_val,train_acc,val_acc, times
     
         else:
             print("training using constant regularization")
@@ -385,6 +389,8 @@ class Trainer:
                     D_k = D_k.permute(1, 0, 2)
                     D_k_prod = torch.bmm(D_k, D_k.transpose(1, 2))  # [C, n, n]
                     G = D_k_prod.permute(1, 2, 0)
+                    R_k = y_batch - model_ibr(X_batch) #torch.func.functional_call(model, dict(parameters), X)  # calculate R_k
+                    R_k = R_k.detach()
                     I = lambdaa*torch.eye(n, device=D_k.device).unsqueeze(2).expand(n, n, C)    # [n, n, C]
                     G_new = G + I  # [1, 3, 3]  broadcasted
                     G_batch = G_new.permute(2, 0, 1)  # [C, n, n] → suitable for batch inversion
@@ -412,29 +418,31 @@ class Trainer:
                         for src_param, tgt_param in zip(parameters, model_ibr.parameters()):
                             tgt_param.copy_(src_param)
                 
-                    tr = self.evaluate(model_ibr,train_loader,device)
+                    #tr = self.evaluate(model_ibr,train_loader,device)
                     tes = self.evaluate(model_ibr,val_loader,device)
 
-                    MSE.append(tr[0])
+                    #MSE.append(tr[0])
                     MSE_val.append(tes[0])  
-                    train_acc.append(tr[1])
+                    #train_acc.append(tr[1])
                     val_acc.append(tes[1])
                     times.append(time.time() - start_time)
                                 
                         
                     if itr > max_iter:
                         break
-                    if MSE[-1] < 0.01: #and train_acc[-1] > 0.95:
-                        print('Early stopping triggered.')
-                        break
+                    # if MSE[-1] < 0.01: #and train_acc[-1] > 0.95:
+                    #     print('Early stopping triggered.')
+                    #     break
                     itr+=1
                     
                     
                     
-                    
+                    print("itr ========",itr)
                 #lambdaa = lambdaa*(k+2)  
-                if MSE[-1] < 0.01 and train_acc[-1] > 0.95:
-                    break
+                # if MSE[-1] < 0.01 and train_acc[-1] > 0.95:
+                #     break
+
+                print(MSE_val)
             return model_ibr,MSE, MSE_val,train_acc,val_acc, times
    
  
