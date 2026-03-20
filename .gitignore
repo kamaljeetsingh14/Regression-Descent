@@ -1,0 +1,62 @@
+# =====================
+# Python cache files
+# =====================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.dylib
+*.pyd
+
+# Virtual environments
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# =====================
+# IPython / Jupyter
+# =====================
+.ipynb_checkpoints/
+
+# =====================
+# Mac OS / system files
+# =====================
+.DS_Store
+Thumbs.db
+
+# =====================
+# Data files
+# =====================
+data/
+*.csv
+*.tsv
+*.json
+*.npz
+*.npy
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+
+# =====================
+# Results / plots
+# =====================
+results/
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.pdf
+*.gif
+
+# =====================
+# Logs / temporary files
+# =====================
+*.log
+*.out
+*.tmp
+*.bak
+*.swp

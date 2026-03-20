@@ -1,0 +1,4 @@
+torch>=2.0
+functorch>=0.3
+numpy>=1.24
+kfac-pytorch
