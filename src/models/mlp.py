@@ -43,3 +43,23 @@ class DeepMLP(nn.Module):
         if self.task == "classification":
             return F.softmax(x, dim=1)
         return x  # regression
+    
+class HardToOptimizeMNIST(nn.Module):
+    def __init__(self):
+        super(HardToOptimizeMNIST, self).__init__()
+        self.fc1 = nn.Linear(28 * 28, 32)
+        self.fc2 = nn.Linear(32, 32)
+        self.fc3 = nn.Linear(32, 32)
+        self.fc4 = nn.Linear(32, 32)
+        self.fc5 = nn.Linear(32, 32)
+        self.fc6 = nn.Linear(32, 10)
+
+    def forward(self, x):
+        x = x.view(-1, 28 * 28)     # Flatten the image
+        x = torch.sigmoid(self.fc1(x))  # Sigmoid instead of ReLU
+        x = torch.sigmoid(self.fc2(x))
+        x = torch.sigmoid(self.fc3(x))
+        x = torch.sigmoid(self.fc4(x))
+        x = torch.sigmoid(self.fc5(x))
+        x = self.fc6(x)             # No softmax; let loss handle logits
+        return x
