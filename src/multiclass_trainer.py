@@ -1,5 +1,6 @@
 # Suppress specific warnings
 import warnings
+from xml.parsers.expat import model
 warnings.filterwarnings(
     "ignore", 
     category=UserWarning, 
@@ -28,131 +29,6 @@ if torch.cuda.is_available():
 else:
     device = torch.device("cpu")  # Fallback to CPU if GPU is not available
     print("CUDA is not available. Training on CPU...")
-
-
-class ThresholdStoppingRule:
-    def __init__(self, loss_threshold=0.01, acc_threshold=0.95):
-        self.loss_threshold = loss_threshold
-        self.acc_threshold = acc_threshold
-        self.early_stop = False
-
-    def __call__(self, metrics):
-        if (metrics["train_loss"] < self.loss_threshold and 
-            metrics["train_acc"] > self.acc_threshold):
-            self.early_stop = True
-            print("Early stopping triggered (threshold rule).")
-        return self.early_stop
-    
-class Error_Stopping_Rule:
-    def __init__(self, patience=5, verbose=False, delta=0.005):
-        """
-        :param patience: How many epochs to wait after the last time validation loss improved.
-        :param verbose: If True, prints a message for each validation loss improvement.
-        :param delta: Minimum change to qualify as an improvement.
-        """
-        self.patience = patience
-        self.verbose = verbose
-        self.delta = delta
-        self.best_loss = torch.inf
-        self.counter = 0
-        self.early_stop = False
-        self.best_model_wts = None
-
-    def __call__(self, val_loss, model):
-        if val_loss < self.best_loss - self.delta:
-            self.best_loss = val_loss
-            self.counter = 0
-            if self.verbose:
-                print(f'Validation loss decreased ({self.best_loss:.6f} --> {val_loss:.6f}).')
-            # Save the best model weights
-            self.best_model_wts = model.state_dict()
-        else:
-            self.counter += 1
-            if self.verbose:
-                print(f'Validation loss did not improve. Counter: {self.counter}/{self.patience}')
-            if self.counter >= self.patience:
-                self.early_stop = True
-
-
-class TrainingErrorStoppingRule:
-    def __init__(self, patience=5, alpha=0.1, verbose=False):
-        """
-        :param patience: How many consecutive steps to wait without improvement.
-        :param alpha: EMA smoothing factor. Smaller = smoother.
-        :param verbose: If True, prints status messages.
-        """
-        self.patience = patience
-        self.alpha = alpha
-        self.verbose = verbose
-
-        self.ema_loss = None
-        self.best_ema_loss = float('inf')
-        self.counter = 0
-        self.early_stop = False
-
-    def __call__(self, current_loss):
-        # Compute EMA
-        if self.ema_loss is None:
-            self.ema_loss = current_loss
-        else:
-            self.ema_loss = self.alpha * current_loss + (1 - self.alpha) * self.ema_loss
-
-        # Check for improvement
-        if self.ema_loss < self.best_ema_loss:
-            self.best_ema_loss = self.ema_loss
-            self.counter = 0
-            if self.verbose:
-                print(f"EMA improved to {self.ema_loss:.6f}")
-        else:
-            self.counter += 1
-            if self.verbose:
-                print(f"No improvement in EMA. Counter: {self.counter}/{self.patience}")
-            if self.counter >= self.patience:
-                self.early_stop = True
-
-class Gradient_Stopping_Rule:
-    def __init__(self, patience=5, verbose=False, grad_norm_threshold=1e-6):
-        """
-        :param patience: How many steps to wait after the last time the gradient norm was below the threshold.
-        :param verbose: If True, prints a message for each gradient norm below the threshold.
-        :param grad_norm_threshold: The threshold below which the gradient norm is considered very small.
-        """
-        self.patience = patience
-        self.verbose = verbose
-        self.grad_norm_threshold = grad_norm_threshold
-        self.counter = 0
-        self.early_stop = False
-
-    def __call__(self, model):
-        """
-        Checks the gradient norm of the model's parameters and updates the early stopping state.
-        :param model: The PyTorch model whose gradients are to be checked.
-        """
-        grad_norm = self.compute_grad_norm(model)
-        
-        if grad_norm < self.grad_norm_threshold:
-            self.counter += 1
-            if self.verbose:
-                print(f'Gradient norm ({grad_norm:.6e}) is below the threshold. Counter: {self.counter}/{self.patience}')
-        else:
-            self.counter = 0
-            if self.verbose:
-                print(f'Gradient norm ({grad_norm:.6e}) is above the threshold.')
-        
-        if self.counter >= self.patience:
-            self.early_stop = True
-
-    def compute_grad_norm(self, model):
-        """
-        Computes the L2 norm of all gradients in the model.
-        :param model: The PyTorch model whose gradients are to be computed.
-        :return: The L2 norm of all gradients.
-        """
-        total_norm = 0.0
-        for param in model.parameters():
-            if param.grad is not None:
-                total_norm += param.grad.data.norm(2).item() ** 2
-        return total_norm ** 0.5
 
 
 class Trainer:
@@ -198,12 +74,12 @@ class Trainer:
         return torch.cat(jacobian, dim=2)  # Batch x Class x Weight
         
     
-    def training_RD(self, train_loader, val_loader, T,lambdaa, adaptive_reg = False, max_iter = 1000, tau = 2.7, nu = 1.8):
+    def training_RD(self, train_loader, val_loader, T,lambdaa, adaptive_reg = False, max_iter = 1000, stopping_rule = None, tau = 2.7, nu = 1.8):
         self.original_shapes = self.get_original_shapes()
         model_ibr = deepcopy(self.model)
         parameters = deepcopy(self.parameters)
         criterion = nn.MSELoss()
-        stopping_rule = TrainingErrorStoppingRule(patience=5,  alpha=0.1, verbose=False)
+        stopping_rule = stopping_rule
         start_time = time.time()
         residuals = deque(maxlen=2)  # Store R_k and R_{k+1} for adaptive regularization
         flag = True
@@ -251,7 +127,7 @@ class Trainer:
                     beta = result.squeeze(2)
                     mean_beta = beta.mean(dim=0)  # Shape: [p]
 
-                    stopping_rule(criterion(model_ibr(X_batch), y_batch).item())
+                    
 
                     
                     param_vec = parameters_to_vector(parameters).detach().clone().requires_grad_(True)    # creating vector of params
@@ -374,20 +250,28 @@ class Trainer:
                                 
                                 
                         lambdaa = torch.clamp(torch.tensor(lambdaa), min=1e-8, max=10).item()
-                    
-                    if itr > max_iter:
+                    metrics = {
+                            "train_loss": train_loss[-1] if train_loss else None,
+                            "val_loss": val_loss[-1] if val_loss else None,
+                            "train_acc": train_acc[-1] if train_acc else None,
+                            "val_acc": val_acc[-1] if val_acc else None,
+                            "model": model_ibr
+                        }
+                        
+                    if stopping_rule is not None:
+                        if stopping_rule(metrics):
+                            print(f"Early stopping at iteration {itr}")
+                            break
+
+                    if max_iter is not None and itr >= max_iter:  # max_iter check
+                        print(f"Reached max iterations: {max_iter}")
+                        stopped_early = True
                         break
-                    # if MSE[-1] < 0.01: #and train_acc[-1] > 0.95:
-                    #     print('Early stopping triggered.')
-                    #     break
-                    itr+=1
-                    
-                    
-                    
-                    
-                #lambdaa = lambdaa*(k+2)  
-                # if MSE[-1] < 0.01 and train_acc[-1] > 0.95:
-                #     break
+
+                    itr += 1
+                    print("itr ========",itr)
+                if stopped_early:  
+                    break
                 
             return model_ibr,train_loss, val_loss,train_acc,val_acc, times
     
@@ -418,8 +302,7 @@ class Trainer:
                     beta = result.squeeze(2)
                     mean_beta = beta.mean(dim=0)  # Shape: [p]
 
-                    stopping_rule(criterion(model_ibr(X_batch), y_batch).item())
-
+                    
                     
                     param_vec = parameters_to_vector(parameters).detach().clone().requires_grad_(True)    # creating vector of params
                     param_vec_old = param_vec
@@ -440,10 +323,10 @@ class Trainer:
                     times.append(time.time() - start_time)
 
                     metrics = {
-                        "train_loss": None,
-                        "val_loss": val_loss,
-                        "train_acc": None,
-                        "val_acc": val_acc,
+                        "train_loss": train_loss[-1] if train_loss else None,
+                        "val_loss": val_loss[-1] if val_loss else None,
+                        "train_acc": train_acc[-1] if train_acc else None,
+                        "val_acc": val_acc[-1] if val_acc else None,
                         "model": model_ibr
                     }
                         
@@ -452,23 +335,22 @@ class Trainer:
                             print(f"Early stopping at iteration {itr}")
                             break
 
-                    if itr > max_iter:
+                    if max_iter is not None and itr >= max_iter:  # max_iter check
+                        print(f"Reached max iterations: {max_iter}")
+                        stopped_early = True
                         break
 
                     itr += 1
-                    
-                    
                     print("itr ========",itr)
-                #lambdaa = lambdaa*(k+2)  
-                # if MSE[-1] < 0.01 and train_acc[-1] > 0.95:
-                #     break
+                if stopped_early:  # epoch-level check
+                    break
 
                 
             return model_ibr,train_loss, val_loss,train_acc,val_acc, times
    
  
     
-    def training_SGD(self, train_dataloader, test_dataloader, epochs, optimize ,learning_rate, testing):
+    def training_SGD(self, train_dataloader, test_dataloader, epochs, optimize ,learning_rate, max_iter = None, stopping_rule = None):
         model = deepcopy(self.model)
         criterion = nn.MSELoss()
         if optimize == "Adam":
@@ -480,12 +362,12 @@ class Trainer:
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.95)
 
         
-        MSE = []
-        MSE_val = []
+        train_loss = []
+        val_loss = []
         train_acc = []
         val_acc = []
         itr=0
-        stopping_rule = TrainingErrorStoppingRule(patience=5,  alpha=0.1, verbose=False)
+        stopping_rule = stopping_rule
         start_time = time.time()  # record training start time
         times = [] 
         for epoch in range(epochs):
@@ -506,36 +388,45 @@ class Trainer:
                 tr = self.evaluate(model,train_dataloader,device)
                 tes = self.evaluate(model,test_dataloader,device)
 
-                MSE.append(tr[0])
-                MSE_val.append(tes[0])  
+                train_loss.append(tr[0])
+                val_loss.append(tes[0])  
                 train_acc.append(tr[1])
                 val_acc.append(tes[1])
                 times.append(time.time() - start_time)      
                 
                 
-                if testing and times[-1] > 10000:
+                metrics = {
+                    "train_loss": train_loss[-1] if train_loss else None,
+                    "val_loss": val_loss[-1] if val_loss else None,
+                    "train_acc": train_acc[-1] if train_acc else None,
+                    "val_acc": val_acc[-1] if val_acc else None,
+                    "model": model
+                }
+                                    
+                if stopping_rule is not None:
+                    if stopping_rule(metrics):
+                        print(f"Early stopping at iteration {itr}")
+                        break
+
+                if max_iter is not None and itr >= max_iter:  # ← max_iter check
+                    print(f"Reached max iterations: {max_iter}")
+                    stopped_early = True
                     break
-                itr+=1
-                print("itr ========",itr)
-            
-            
-        
-            #     early_stopping(model)
-                
-        
-                #if MSE[-1] < 0.01 and train_acc[-1] > 0.95:
-                    #print('Early stopping triggered.')
-                    #break
+
+                    itr += 1
+                    print("itr ========",itr)
+                if stopped_early:  # ← epoch-level check
+                    break
 
 
                 
             scheduler.step()
-            #if MSE[-1] < 0.01 and train_acc[-1] > 0.95:
-                #break
+            if stopped_early:  # ← epoch-level check
+                break
                 
-        return model, MSE, MSE_val, train_acc, val_acc, times
+        return model, train_loss, val_loss, train_acc, val_acc, times
     
-    def train_KFAC(self, train_dataloader, test_dataloader, epochs, optimize ,learning_rate, max_iter, use_kfac=False):
+    def train_KFAC(self, train_dataloader, test_dataloader, epochs, optimize ,learning_rate, max_iter, stopping_rule = None, use_kfac=False):
         model = deepcopy(self.model)
         criterion = nn.MSELoss()
         if optimize == "Adam":
@@ -548,15 +439,15 @@ class Trainer:
         precond = KFACPreconditioner(model) if use_kfac else None
         
 
-        MSE = []
-        MSE_val = []
+        train_loss = []
+        val_loss = []
         train_acc = []
         val_acc = []
         times = []
 
         itr = 0
         start_time = time.time()
-        stopping_rule = TrainingErrorStoppingRule(patience=5, alpha=0.1, verbose=False)
+        stopping_rule = stopping_rule
 
         for epoch in range(epochs):
             
@@ -582,32 +473,40 @@ class Trainer:
                 precond.step()
 
                 optimizer.step()
-                stopping_rule(criterion(model(X_batch), y_batch).item())
                 # Evaluate on training and test data
                 tr= self.evaluate(model, train_dataloader, device)
                 val = self.evaluate(model, test_dataloader, device)
 
-                MSE.append(tr[0])
-                MSE_val.append(val[0])
+                train_loss.append(tr[0])
+                val_loss.append(val[0])
                 train_acc.append(tr[1])
                 val_acc.append(val[1])
                 times.append(time.time() - start_time)
 
+                metrics = {
+                    "train_loss": train_loss[-1] if train_loss else None,
+                    "val_loss": val_loss[-1] if val_loss else None,
+                    "train_acc": train_acc[-1] if train_acc else None,
+                    "val_acc": val_acc[-1] if val_acc else None,
+                    "model": model
+                }
+                    
+                if stopping_rule is not None:
+                    if stopping_rule(metrics):
+                        print(f"Early stopping at iteration {itr}")
+                        break
                 
 
                 if max_iter> 20:
                     break
-                if MSE[-1] < 0.01 and train_acc[-1] > 0.95:
-                    print("Early stopping triggered.")
-                    break
+                
 
-            print(f"KFAC epoch {epoch}, train_loss={MSE[-1]:.4f}, train_acc={train_acc[-1]:.4f}, val_acc={val_acc[-1]:.4f}")
+            print(f"KFAC epoch {epoch}, train_loss={train_loss[-1]:.4f}, train_acc={train_acc[-1]:.4f}, val_acc={val_acc[-1]:.4f}")
             scheduler.step()
                 
-            if MSE[-1] < 0.01 and train_acc[-1] > 0.95:
-                break
+            
 
-        return model, MSE, MSE_val, train_acc, val_acc, times
+        return model, train_loss, val_loss, train_acc, val_acc, times
         
     def eigen_spectra(self, D):
         SIGMA = []
