@@ -1,4 +1,5 @@
 # Suppress specific warnings
+from ast import arguments
 import warnings
 from xml.parsers.expat import model
 warnings.filterwarnings(
@@ -74,7 +75,59 @@ class Trainer:
         return torch.cat(jacobian, dim=2)  # Batch x Class x Weight
         
     
-    def training_RD(self, train_loader, val_loader, T,lambdaa, adaptive_reg = False, max_iter = 1000, stopping_rule = None, tau = 2.7, nu = 1.8):
+    def training_RD(self, train_loader, val_loader, epochs,lambdaa, adaptive_reg = False, max_iter = 1000, stopping_rule = None, eval_mode = "full", subset_fraction = 0.1, tau = 2.7, nu = 1.8):
+        """
+        Trains the model using Regression Descent (RD) with optional adaptive regularization and various stopping rules.
+            Parameters
+            ----------
+            train_loader : DataLoader
+                PyTorch DataLoader providing the training dataset.
+
+            val_loader : DataLoader
+                PyTorch DataLoader providing the validation dataset.
+
+            epochs : int 
+                Number of training epochs.
+
+            lambdaa : float
+                Regularization coefficient controlling the strength of the RD term.
+
+            adaptive_reg : bool, optional (default=False)
+                If True, applies adaptive regularization during training.
+
+            max_iter : int, optional (default=1000)
+                Maximum number of training iterations.
+
+            stopping_rule : callable or None, optional (default=None)
+                Function that determines different early stopping rulesbased on metrics.
+
+            eval_mode : str, optional (default="full")
+            Evaluation strategy used during training:
+            
+            - "full": evaluates on the entire dataset.
+            - "subset": evaluates on a random subset of the dataset (controlled by `subset_fraction`).
+            - "single_batch": evaluates using a single batch.
+            - "running_avg": evaluates using a running average over recent batches.
+
+
+            subset_fraction : float, optional (default=0.1)
+                Fraction of data used for evaluation when eval_mode is "subset".
+
+            tau : float, optional (default=2.7)
+                Hyperparameter used to decrease the regularization coefficient lambda in adaptive regularization.
+
+            nu : float, optional (default=1.8)
+                Hyperparameter used to increase the regularization coefficient lambda in adaptive regularization.
+
+            Returns
+            -------
+            trained model: nn.Module
+            train_loss: list of training losses over iterations
+            val_loss: list of validation losses over iterations
+            train_acc: list of training accuracies over iterations
+            val_acc: list of validation accuracies over iterations
+            times: list of training times over iterations
+        """
         self.original_shapes = self.get_original_shapes()
         model_ibr = deepcopy(self.model)
         parameters = deepcopy(self.parameters)
@@ -87,7 +140,10 @@ class Trainer:
         itr = 0
         if adaptive_reg:
             print("training using adaptive regularization")
-            for k in range(T):
+            for k in range(epochs):
+                self.reset_running_avg()  
+            
+                stopped_early = False
                 data_iter1, data_iter2 = tee(train_loader)
 
                 # Get the first batch from data_iter2 for wrap-around
@@ -183,8 +239,8 @@ class Trainer:
                                 #print("there")    
                                 lambdaa = lambdaa*nu
                             
-                            tr = self.evaluate(model_ibr,train_loader,device)
-                            tes = self.evaluate(model_ibr,val_loader,device)
+                            tr = self.evaluate(model_ibr,train_loader,device,eval_mode = eval_mode, subset_fraction=subset_fraction)
+                            tes = self.evaluate(model_ibr,val_loader,device,eval_mode = "full")
 
                             train_loss.append(tr[0])
                             val_loss.append(tes[0])  
@@ -278,6 +334,8 @@ class Trainer:
         else:
             print("training using constant regularization")
             for k in range(T):
+                self.reset_running_avg()  # reset running average
+                stopped_early = False
                 for X_batch, y_batch in train_loader:
                     X_batch,y_batch = X_batch.to(device),y_batch.to(device)
                     D_k = self.batched_jacobian(parameters, X_batch).detach()
@@ -313,8 +371,8 @@ class Trainer:
                         for src_param, tgt_param in zip(parameters, model_ibr.parameters()):
                             tgt_param.copy_(src_param)
                 
-                    tr = self.evaluate(model_ibr,train_loader,device)
-                    tes = self.evaluate(model_ibr,val_loader,device)
+                    tr = self.evaluate(model_ibr,train_loader,device,eval_mode=eval_mode, subset_fraction=subset_fraction)
+                    tes = self.evaluate(model_ibr,val_loader,device,eval_mode="full", subset_fraction=subset_fraction)
 
                     train_loss.append(tr[0])
                     val_loss.append(tes[0])  
@@ -350,7 +408,69 @@ class Trainer:
    
  
     
-    def training_SGD(self, train_dataloader, test_dataloader, epochs, optimize ,learning_rate, max_iter = None, stopping_rule = None):
+    def training_SGD(self, train_dataloader, test_dataloader, epochs, optimize ,learning_rate, max_iter = None, stopping_rule = None, eval_mode = "full", subset_fraction = 0.1):
+        """
+        Train the model using standard optimization methods (SGD or Adam).
+
+        Parameters
+        ----------
+        train_dataloader : DataLoader
+            PyTorch DataLoader providing the training dataset.
+
+        test_dataloader : DataLoader
+            PyTorch DataLoader providing the test/validation dataset.
+
+        epochs : int
+            Number of training epochs.
+
+        optimize : str
+            Optimization algorithm to use. Supported options:
+            - "Adam": uses the Adam optimizer.
+            - otherwise: defaults to standard SGD.
+
+        learning_rate : float
+            Learning rate used by the optimizer.
+
+        max_iter : int or None, optional (default=None)
+            Maximum number of training iterations. If None, training proceeds
+            for the full number of epochs.
+
+        stopping_rule : callable or None, optional (default=None)
+            Function that defines early stopping criteria based on training
+            or validation metrics.
+
+        eval_mode : str, optional (default="full")
+            Evaluation strategy used during training:
+
+            - "full": evaluates on the entire dataset.
+            - "subset": evaluates on a random subset of the dataset
+            (controlled by `subset_fraction`).
+            - "single_batch": evaluates using a single batch.
+            - "running_avg": evaluates using a running average over recent batches.
+
+        subset_fraction : float, optional (default=0.1)
+            Fraction of data used for evaluation when `eval_mode` is "subset".
+
+        Returns
+        -------
+        trained model : nn.Module
+            The trained model.
+
+        train_loss : list
+            Training loss recorded over iterations.
+
+        test_loss : list
+            Test/validation loss recorded over iterations.
+
+        train_acc : list
+            Training accuracy recorded over iterations.
+
+        test_acc : list
+            Test/validation accuracy recorded over iterations.
+
+        times : list
+            Cumulative training time recorded over iterations.
+        """
         model = deepcopy(self.model)
         criterion = nn.MSELoss()
         if optimize == "Adam":
@@ -371,7 +491,9 @@ class Trainer:
         start_time = time.time()  # record training start time
         times = [] 
         for epoch in range(epochs):
+            self.reset_running_avg()  
             model.train()
+            stopped_early = False
             # Training loop
             for X_batch, y_batch in train_dataloader:
                 
@@ -385,8 +507,8 @@ class Trainer:
                 #stopping_rule(criterion(model(X_batch), y_batch).item())
 
             # Calculate MSE on the full dataset
-                tr = self.evaluate(model,train_dataloader,device)
-                tes = self.evaluate(model,test_dataloader,device)
+                tr = self.evaluate(model,train_dataloader,device, eval_mode=eval_mode, subset_fraction=subset_fraction)
+                tes = self.evaluate(model,test_dataloader,device, eval_mode="full", subset_fraction=subset_fraction)
 
                 train_loss.append(tr[0])
                 val_loss.append(tes[0])  
@@ -413,8 +535,8 @@ class Trainer:
                     stopped_early = True
                     break
 
-                    itr += 1
-                    print("itr ========",itr)
+                itr += 1
+                print("itr ========",itr)
                 if stopped_early:  # ← epoch-level check
                     break
 
@@ -426,7 +548,72 @@ class Trainer:
                 
         return model, train_loss, val_loss, train_acc, val_acc, times
     
-    def train_KFAC(self, train_dataloader, test_dataloader, epochs, optimize ,learning_rate, max_iter, stopping_rule = None, use_kfac=False):
+    def train_KFAC(self, train_dataloader, test_dataloader, epochs, optimize ,learning_rate, max_iter, stopping_rule = None, use_kfac=False, eval_mode = "full", subset_fraction = 0.1):
+        """
+        Train the model using SGD/Adam with optional K-FAC preconditioning.
+
+        Parameters
+        ----------
+        train_dataloader : DataLoader
+            PyTorch DataLoader providing the training dataset.
+
+        test_dataloader : DataLoader
+            PyTorch DataLoader providing the test/validation dataset.
+
+        epochs : int
+            Number of training epochs.
+
+        optimize : str
+            Optimization algorithm to use. Supported options:
+            - "Adam": uses the Adam optimizer.
+            - otherwise: defaults to standard SGD.
+
+        learning_rate : float
+            Learning rate used by the optimizer.
+
+        max_iter : int
+            Maximum number of training iterations.
+
+        stopping_rule : callable or None, optional (default=None)
+            Function that defines early stopping criteria based on training
+            or validation metrics.
+
+        use_kfac : bool, optional (default=False)
+            If True, applies K-FAC (Kronecker-Factored Approximate Curvature)
+            preconditioning during optimization.
+
+        eval_mode : str, optional (default="full")
+            Evaluation strategy used during training:
+
+            - "full": evaluates on the entire dataset.
+            - "subset": evaluates on a random subset of the dataset
+            (controlled by `subset_fraction`).
+            - "single_batch": evaluates using a single batch.
+            - "running_avg": evaluates using a running average over recent batches.
+
+        subset_fraction : float, optional (default=0.1)
+            Fraction of data used for evaluation when `eval_mode` is "subset".
+
+        Returns
+        -------
+        trained model : nn.Module
+            The trained model.
+
+        train_loss : list
+            Training loss recorded over iterations.
+
+        test_loss : list
+            Test/validation loss recorded over iterations.
+
+        train_acc : list
+            Training accuracy recorded over iterations.
+
+        test_acc : list
+            Test/validation accuracy recorded over iterations.
+
+        times : list
+            Cumulative training time recorded over iterations.
+        """
         model = deepcopy(self.model)
         criterion = nn.MSELoss()
         if optimize == "Adam":
@@ -450,8 +637,9 @@ class Trainer:
         stopping_rule = stopping_rule
 
         for epoch in range(epochs):
-            
+            self.reset_running_avg()  
             model.train()
+            stopped_early = False
             for X_batch, y_batch in train_dataloader:
                 itr += 1
                 
@@ -474,8 +662,8 @@ class Trainer:
 
                 optimizer.step()
                 # Evaluate on training and test data
-                tr= self.evaluate(model, train_dataloader, device)
-                val = self.evaluate(model, test_dataloader, device)
+                tr= self.evaluate(model, train_dataloader, device, eval_mode=eval_mode, subset_fraction=subset_fraction)
+                val = self.evaluate(model, test_dataloader, device, eval_mode="full", subset_fraction=subset_fraction)
 
                 train_loss.append(tr[0])
                 val_loss.append(val[0])
@@ -496,9 +684,25 @@ class Trainer:
                         print(f"Early stopping at iteration {itr}")
                         break
                 
-
-                if max_iter> 20:
+                                    
+                
+                if max_iter is not None and itr >= max_iter:  # ← max_iter check
+                    print(f"Reached max iterations: {max_iter}")
+                    stopped_early = True
                     break
+
+                itr += 1
+                print("itr ========",itr)
+            
+
+
+                
+            scheduler.step()
+            if stopped_early:  # ← epoch-level check
+                break
+                
+
+        
                 
 
             print(f"KFAC epoch {epoch}, train_loss={train_loss[-1]:.4f}, train_acc={train_acc[-1]:.4f}, val_acc={val_acc[-1]:.4f}")
