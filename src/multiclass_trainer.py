@@ -521,47 +521,112 @@ class Trainer:
         return U, SIGMA, VT
     
     
-    def evaluate(self, model, loader, device):
+    # def evaluate(self, model, loader, device):
+    #     model.eval()
+    #     total_loss = 0.0
+    #     total_correct = 0
+    #     total_samples = 0
+    
+    #     ce_criterion = nn.CrossEntropyLoss()
+    #     mse_criterion = nn.MSELoss()
+    
+    #     with torch.no_grad():
+    #         for data, target in loader:
+    #             data, target = data.to(device), target.to(device)
+    
+    #             output = model(data)                 # [B, C]
+    
+    #             # ------------- detect target format automatically -------------
+    #             if target.dim() == 2 and target.size(1) == output.size(1):
+    #                 # Case 1: one-hot encoded → MSE
+    #                 loss = mse_criterion(output, target)
+    #                 target_indices = target.argmax(dim=1)
+    #             elif target.dim() == 1:
+    #                 # Case 2: class indices → CE
+    #                 loss = ce_criterion(output, target)
+    #                 target_indices = target
+    #             else:
+    #                 raise ValueError(
+    #                     f"Target tensor shape {target.shape} is not valid. "
+    #                     f"Expected (B) or (B, num_classes={output.size(1)})."
+    #                 )
+    #             # -----------------------------------------------------------------
+    
+    #             total_loss += loss.item() * data.size(0)
+    #             pred = output.argmax(dim=1)
+    #             total_correct += pred.eq(target_indices).sum().item()
+    #             total_samples += data.size(0)
+    
+    #     avg_loss = total_loss / total_samples
+    #     accuracy = total_correct / total_samples
+    #     return avg_loss, accuracy
+
+    def reset_running_avg(self):
+        """Call once at the start of each epoch."""
+        self._running_loss = 0.0
+        self._running_correct = 0
+        self._running_samples = 0
+
+    def evaluate(self, model, loader, device, eval_mode="full", subset_fraction=0.1):
+        mse_criterion = nn.MSELoss()
+
+        # --- select which batches to evaluate on ---
+        if eval_mode == "subset":
+            all_batches = list(loader)
+            n = max(1, int(len(all_batches) * subset_fraction))
+            indices = torch.randperm(len(all_batches))[:n]
+            batches = [all_batches[i] for i in indices]
+        elif eval_mode == "single_batch":
+            batches = [next(iter(loader))]
+        else:  # "full" and "running_avg" both iterate the loader
+            batches = loader
+
         model.eval()
         total_loss = 0.0
         total_correct = 0
         total_samples = 0
-    
-        ce_criterion = nn.CrossEntropyLoss()
-        mse_criterion = nn.MSELoss()
-    
+
         with torch.no_grad():
-            for data, target in loader:
+            for data, target in batches:
                 data, target = data.to(device), target.to(device)
-    
-                output = model(data)                 # [B, C]
-    
-                # ------------- detect target format automatically -------------
+                output = model(data)                          # [B, C]
+
+                # --- normalize target format to class indices ---
                 if target.dim() == 2 and target.size(1) == output.size(1):
-                    # Case 1: one-hot encoded → MSE
-                    loss = mse_criterion(output, target)
+                    # one-hot encoded → convert to class indices for accuracy
+                    loss = mse_criterion(output, target.float())
                     target_indices = target.argmax(dim=1)
                 elif target.dim() == 1:
-                    # Case 2: class indices → CE
-                    loss = ce_criterion(output, target)
+                    # class indices → convert to one-hot for MSE
+                    target_onehot = torch.zeros_like(output)
+                    target_onehot.scatter_(1, target.unsqueeze(1), 1.0)
+                    loss = mse_criterion(output, target_onehot)
                     target_indices = target
                 else:
                     raise ValueError(
-                        f"Target tensor shape {target.shape} is not valid. "
-                        f"Expected (B) or (B, num_classes={output.size(1)})."
+                        f"Target shape {target.shape} not valid. "
+                        f"Expected (B,) or (B, num_classes={output.size(1)})."
                     )
-                # -----------------------------------------------------------------
-    
+
                 total_loss += loss.item() * data.size(0)
                 pred = output.argmax(dim=1)
                 total_correct += pred.eq(target_indices).sum().item()
                 total_samples += data.size(0)
-    
-        avg_loss = total_loss / total_samples
-        accuracy = total_correct / total_samples
+
+        # --- running avg: accumulate, don't reset ---
+        if eval_mode == "running_avg":
+            self._running_loss += total_loss
+            self._running_correct += total_correct
+            self._running_samples += total_samples
+            avg_loss = self._running_loss / self._running_samples
+            accuracy = self._running_correct / self._running_samples
+        else:
+            avg_loss = total_loss / total_samples
+            accuracy = total_correct / total_samples
+
         return avg_loss, accuracy
 
-    
+        
     def evaluate_batch(self, model, X_batch, y_batch):
         """
         Evaluate model performance on a single batch.
