@@ -293,9 +293,16 @@ class Trainer:
                                 for src_param, tgt_param in zip(parameters, model_ibr.parameters()):
                                     tgt_param.copy_(src_param)
 
-                            tr = self.evaluate(model_ibr,train_loader,device)
-                            tes = self.evaluate(model_ibr,val_loader,device)
-
+                            # tr = self.evaluate(model_ibr,train_loader,device)
+                            # tes = self.evaluate(model_ibr,val_loader,device)
+                            if eval_mode in ("running_avg", "single_batch"):
+                                # pass current batch directly
+                                tr  = self.evaluate(model_ibr, (X_batch, y_batch), device, eval_mode=eval_mode,subset_fraction=subset_fraction)
+                                tes = self.evaluate(model_ibr, (X_batch, y_batch), device, eval_mode="full")
+                            else:
+                                # pass full loader for "full" and "subset"
+                                tr  = self.evaluate(model_ibr, train_loader, device, eval_mode=eval_mode,subset_fraction=subset_fraction)
+                                tes = self.evaluate(model_ibr, val_loader,  device, eval_mode="full")
                             train_loss.append(tr[0])
                             val_loss.append(tes[0])  
                             train_acc.append(tr[1])
@@ -333,7 +340,7 @@ class Trainer:
     
         else:
             print("training using constant regularization")
-            for k in range(T):
+            for k in range(epochs):
                 self.reset_running_avg()  # reset running average
                 stopped_early = False
                 for X_batch, y_batch in train_loader:
@@ -371,9 +378,16 @@ class Trainer:
                         for src_param, tgt_param in zip(parameters, model_ibr.parameters()):
                             tgt_param.copy_(src_param)
                 
-                    tr = self.evaluate(model_ibr,train_loader,device,eval_mode=eval_mode, subset_fraction=subset_fraction)
-                    tes = self.evaluate(model_ibr,val_loader,device,eval_mode="full", subset_fraction=subset_fraction)
-
+                    # tr = self.evaluate(model_ibr,train_loader,device,eval_mode=eval_mode, subset_fraction=subset_fraction)
+                    # tes = self.evaluate(model_ibr,val_loader,device,eval_mode="full", subset_fraction=subset_fraction)
+                    if eval_mode in ("running_avg", "single_batch"):
+                        # pass current batch directly
+                        tr  = self.evaluate(model_ibr, (X_batch, y_batch), device, eval_mode=eval_mode,subset_fraction=subset_fraction)
+                        tes = self.evaluate(model_ibr, val_loader, device, eval_mode="full")
+                    else:
+                        # pass full loader for "full" and "subset"
+                        tr  = self.evaluate(model_ibr, train_loader, device, eval_mode=eval_mode,subset_fraction=subset_fraction)
+                        tes = self.evaluate(model_ibr, val_loader,  device, eval_mode="full")
                     train_loss.append(tr[0])
                     val_loss.append(tes[0])  
                     train_acc.append(tr[1])
@@ -507,9 +521,16 @@ class Trainer:
                 #stopping_rule(criterion(model(X_batch), y_batch).item())
 
             # Calculate MSE on the full dataset
-                tr = self.evaluate(model,train_dataloader,device, eval_mode=eval_mode, subset_fraction=subset_fraction)
-                tes = self.evaluate(model,test_dataloader,device, eval_mode="full", subset_fraction=subset_fraction)
-
+                # tr = self.evaluate(model,train_dataloader,device, eval_mode=eval_mode, subset_fraction=subset_fraction)
+                # tes = self.evaluate(model,test_dataloader,device, eval_mode="full", subset_fraction=subset_fraction)
+                if eval_mode in ("running_avg", "single_batch"):
+                    # pass current batch directly
+                    tr  = self.evaluate(model, (X_batch, y_batch), device, eval_mode=eval_mode,subset_fraction=subset_fraction)
+                    tes = self.evaluate(model, test_dataloader, device, eval_mode="full")
+                else:
+                    # pass full loader for "full" and "subset"
+                    tr  = self.evaluate(model, train_dataloader, device, eval_mode=eval_mode,subset_fraction=subset_fraction)
+                    tes = self.evaluate(model, test_dataloader,  device, eval_mode="full")
                 train_loss.append(tr[0])
                 val_loss.append(tes[0])  
                 train_acc.append(tr[1])
@@ -662,8 +683,16 @@ class Trainer:
 
                 optimizer.step()
                 # Evaluate on training and test data
-                tr= self.evaluate(model, train_dataloader, device, eval_mode=eval_mode, subset_fraction=subset_fraction)
-                val = self.evaluate(model, test_dataloader, device, eval_mode="full", subset_fraction=subset_fraction)
+                if eval_mode in ("running_avg", "single_batch"):
+                    # pass current batch directly
+                    tr  = self.evaluate(model, (X_batch, y_batch), device, eval_mode=eval_mode,subset_fraction=subset_fraction)
+                    val = self.evaluate(model, test_dataloader, device, eval_mode="full")
+                else:
+                    # pass full loader for "full" and "subset"
+                    tr  = self.evaluate(model, train_dataloader, device, eval_mode=eval_mode,subset_fraction=subset_fraction)
+                    val = self.evaluate(model, test_dataloader,  device, eval_mode="full")
+                # tr= self.evaluate(model, train_dataloader, device, eval_mode=eval_mode, subset_fraction=subset_fraction)
+                # val = self.evaluate(model, test_dataloader, device, eval_mode="full", subset_fraction=subset_fraction)
 
                 train_loss.append(tr[0])
                 val_loss.append(val[0])
@@ -771,19 +800,23 @@ class Trainer:
         self._running_correct = 0
         self._running_samples = 0
 
-    def evaluate(self, model, loader, device, eval_mode="full", subset_fraction=0.1):
+
+    def evaluate(self, model, loader_or_batch, device, eval_mode="full", subset_fraction=0.1):
         mse_criterion = nn.MSELoss()
 
-        # --- select which batches to evaluate on ---
-        if eval_mode == "subset":
-            all_batches = list(loader)
+        # --- select batches based on mode ---
+        if eval_mode in ("running_avg", "single_batch"):
+            # both receive a single (X_batch, y_batch) tuple from the training loop
+            batches = [loader_or_batch]
+
+        elif eval_mode == "subset":
+            all_batches = list(loader_or_batch)
             n = max(1, int(len(all_batches) * subset_fraction))
             indices = torch.randperm(len(all_batches))[:n]
             batches = [all_batches[i] for i in indices]
-        elif eval_mode == "single_batch":
-            batches = [next(iter(loader))]
-        else:  # "full" and "running_avg" both iterate the loader
-            batches = loader
+
+        else:  # "full"
+            batches = loader_or_batch
 
         model.eval()
         total_loss = 0.0
@@ -793,15 +826,12 @@ class Trainer:
         with torch.no_grad():
             for data, target in batches:
                 data, target = data.to(device), target.to(device)
-                output = model(data)                          # [B, C]
+                output = model(data)
 
-                # --- normalize target format to class indices ---
                 if target.dim() == 2 and target.size(1) == output.size(1):
-                    # one-hot encoded → convert to class indices for accuracy
                     loss = mse_criterion(output, target.float())
                     target_indices = target.argmax(dim=1)
                 elif target.dim() == 1:
-                    # class indices → convert to one-hot for MSE
                     target_onehot = torch.zeros_like(output)
                     target_onehot.scatter_(1, target.unsqueeze(1), 1.0)
                     loss = mse_criterion(output, target_onehot)
@@ -817,19 +847,17 @@ class Trainer:
                 total_correct += pred.eq(target_indices).sum().item()
                 total_samples += data.size(0)
 
-        # --- running avg: accumulate, don't reset ---
         if eval_mode == "running_avg":
-            self._running_loss += total_loss
+            self._running_loss    += total_loss
             self._running_correct += total_correct
             self._running_samples += total_samples
-            avg_loss = self._running_loss / self._running_samples
+            avg_loss = self._running_loss    / self._running_samples
             accuracy = self._running_correct / self._running_samples
         else:
-            avg_loss = total_loss / total_samples
+            avg_loss = total_loss  / total_samples
             accuracy = total_correct / total_samples
 
         return avg_loss, accuracy
-
         
     def evaluate_batch(self, model, X_batch, y_batch):
         """

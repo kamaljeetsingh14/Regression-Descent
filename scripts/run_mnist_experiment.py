@@ -7,9 +7,9 @@ from src.stopping_rules import ValidationLossStoppingRule, ThresholdStoppingRule
 import pandas as pd
 # Pick one
 # stopping_rule = ValidationLossStoppingRule(patience=5, delta=0.001, verbose=True)
-# stopping_rule = ThresholdStoppingRule(loss_threshold=0.01, acc_threshold=0.95)
+stopping_rule = ThresholdStoppingRule(loss_threshold=0.01, acc_threshold=0.95)
 # stopping_rule = EMATrainingStoppingRule(patience=5, alpha=0.1)
-stopping_rule = GradientStoppingRule(patience=5, grad_norm_threshold=1e-6)
+# stopping_rule = GradientStoppingRule(patience=5, grad_norm_threshold=1e-6)
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -19,9 +19,10 @@ model = SmallCNN().to(device)
 trainer = Trainer(model)
 
 print("RD start:", datetime.now())
-model_RD, mse, mse_val, train_acc, val_acc, time_rd = trainer.training_RD(train_loader, val_loader, 1,0.01, adaptive_reg = False, max_iter = 100, stopping_rule = stopping_rule, tau = 2.7, nu = 1.8)
-#model_RD, mse, mse_val, train_acc, val_acc, time_rd = trainer.training_RD( train_loader, val_loader, T,lambdaa, adaptive_reg = False, max_iter = 1000, stopping_rule = None, tau = 2.7, nu = 1.8):
+model_RD, mse, mse_val, train_acc, val_acc, time_rd = trainer.training_RD(train_loader, val_loader, 1,0.01, adaptive_reg = False, max_iter = 10, stopping_rule = stopping_rule, eval_mode= "subset", subset_fraction = 0.1, tau = 2.7, nu = 1.8)
+#training_RD(                                                       self, train_loader, val_loader, epochs,lambdaa, adaptive_reg = False, max_iter = 1000, stopping_rule = None, eval_mode = "full", subset_fraction = 0.1, tau = 2.7, nu = 1.8):
 print(mse)
+print(time_rd)
 print("RD end:", datetime.now())
 # Save results
 
