@@ -27,10 +27,29 @@ for understanding neural network optimization through the lens of statistical re
 - `results/` – Figures, tables, and outputs from experiments
 - `requirements.txt` – Python dependencies
 
-
 ## Usage
 
 1. Install dependencies:
-
 ```bash
 pip install -r requirements.txt
+```
+
+2. To run an experiment, use:
+
+For default setting:
+```bash
+python -m scripts.run_mnist_experiment
+```
+
+For custom setting:
+```bash
+python -m scripts.run_mnist_experiment \
+    --epochs 5 \
+    --max_iter 200 \
+    --batch_size 64 \
+    --lambda_reg 1e-5 \
+    --eval_mode running_avg \
+    --subset_fraction 0.1 \
+    --lr_sgd 0.01 \
+    --lr_adam 0.001
+```

@@ -1,3 +1,4 @@
+import argparse
 import torch
 from datetime import datetime
 import pandas as pd
@@ -10,9 +11,25 @@ from src.stopping_rules import ThresholdStoppingRule
 from src.utils import save_results_csv, plot_training_validation, ensure_dir
 
 # ---------------------------
+# Argument parser
+# ---------------------------
+parser = argparse.ArgumentParser(description="Run MNIST binary experiment with multiple optimizers")
+parser.add_argument("--epochs", type=int, default=1, help="Number of epochs")
+parser.add_argument("--max_iter", type=int, default=50, help="Maximum iterations per epoch")
+parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
+parser.add_argument("--lambda_reg", type=float, default=1e-5, help="Regularization coefficient")
+parser.add_argument("--eval_mode", type=str, default="running_avg", choices=["full", "running_avg", "single_batch"])
+parser.add_argument("--subset_fraction", type=float, default=0.1, help="Fraction of data for evaluation")
+parser.add_argument("--lr_sgd", type=float, default=0.01, help="SGD learning rate")
+parser.add_argument("--lr_adam", type=float, default=0.001, help="Adam learning rate")
+parser.add_argument("--class0", type=int, default=0, help="First class for binary experiment")
+parser.add_argument("--class1", type=int, default=1, help="Second class for binary experiment")
+args = parser.parse_args()
+
+# ---------------------------
 # Binary setup
 # ---------------------------
-binary_classes = [0, 1]  # Choose any two MNIST classes
+binary_classes = [args.class0, args.class1]
 
 # ---------------------------
 # Stopping rule
@@ -28,7 +45,7 @@ print(f"Using device: {device}")
 # ---------------------------
 # Load MNIST
 # ---------------------------
-train_loader_full, val_loader_full = load_mnist(batch_size=32)
+train_loader_full, val_loader_full = load_mnist(batch_size=args.batch_size)
 
 # Filter for binary classes
 def filter_binary(loader, classes=binary_classes):
@@ -37,7 +54,7 @@ def filter_binary(loader, classes=binary_classes):
         mask = torch.isin(y.argmax(dim=1), torch.tensor(classes))
         if mask.any():
             X_list.append(X[mask])
-            y_list.append(y[mask][:, classes])  # keep only 2 columns
+            y_list.append(y[mask][:, classes])  # keep only two columns
     X_bin = torch.cat(X_list, dim=0)
     y_bin = torch.cat(y_list, dim=0)
     return torch.utils.data.TensorDataset(X_bin, y_bin)
@@ -45,40 +62,37 @@ def filter_binary(loader, classes=binary_classes):
 train_dataset_bin = filter_binary(train_loader_full)
 val_dataset_bin = filter_binary(val_loader_full)
 
-train_loader = torch.utils.data.DataLoader(train_dataset_bin, batch_size=32, shuffle=True)
-val_loader = torch.utils.data.DataLoader(val_dataset_bin, batch_size=32, shuffle=False)
+train_loader = torch.utils.data.DataLoader(train_dataset_bin, batch_size=args.batch_size, shuffle=True)
+val_loader = torch.utils.data.DataLoader(val_dataset_bin, batch_size=args.batch_size, shuffle=False)
 
 # ---------------------------
 # Model
 # ---------------------------
-
 class SmallCNN(nn.Module):
     def __init__(self):
         super(SmallCNN, self).__init__()
-        self.conv1 = nn.Conv2d(1, 8, kernel_size=3)  # 1 input channel, 8 output channels, 3x3 kernel
-        self.pool = nn.MaxPool2d(2, 2)               # 2x2 max pooling
-        self.fc1 = nn.Linear(8 * 13 * 13, 2)        # after conv+pool, size is 13x13
+        self.conv1 = nn.Conv2d(1, 8, kernel_size=3)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.fc1 = nn.Linear(8 * 13 * 13, 2)
 
     def forward(self, x):
-        x = F.relu(self.conv1(x))   # conv + ReLU
-        x = self.pool(x)            # max pooling
-        x = x.view(-1, 8 * 13 * 13) # flatten
-        x = self.fc1(x)             # fully connected layer
+        x = F.relu(self.conv1(x))
+        x = self.pool(x)
+        x = x.view(-1, 8 * 13 * 13)
+        x = self.fc1(x)
         return x
-    
-model = SmallCNN()
-#model.fc = torch.nn.Linear(model.fc.in_features, 2)  # output 2 classes
-model = model.to(device)
+
+model = SmallCNN().to(device)
 trainer = Trainer(model)
 
 # ---------------------------
 # Training settings
 # ---------------------------
-epoch = 1
-lambda_reg = 1e-5
-eval_mode = "running_avg"
-max_iter = 50
-subset_fraction = 0.1
+epoch = args.epochs
+lambda_reg = args.lambda_reg
+eval_mode = args.eval_mode
+max_iter = args.max_iter
+subset_fraction = args.subset_fraction
 
 # ---------------------------
 # Train all methods
@@ -104,7 +118,7 @@ model_SGD, train_loss_sgd, val_loss_sgd, train_acc_sgd, val_acc_sgd, time_sgd = 
     train_loader, val_loader,
     epochs=epoch,
     optimize=None,
-    learning_rate=0.01,
+    learning_rate=args.lr_sgd,
     max_iter=max_iter,
     stopping_rule=stopping_rule,
     eval_mode=eval_mode,
@@ -116,7 +130,7 @@ model_ADAM, train_loss_adam, val_loss_adam, train_acc_adam, val_acc_adam, time_a
     train_loader, val_loader,
     epochs=epoch,
     optimize="Adam",
-    learning_rate=0.001,
+    learning_rate=args.lr_adam,
     max_iter=max_iter,
     stopping_rule=stopping_rule,
     eval_mode=eval_mode,
@@ -128,7 +142,7 @@ model_KFAC, train_loss_KFAC, val_loss_KFAC, train_acc_KFAC, val_acc_KFAC, time_K
     train_loader, val_loader,
     epochs=epoch,
     optimize="Adam",
-    learning_rate=0.001,
+    learning_rate=args.lr_adam,
     max_iter=max_iter,
     stopping_rule=stopping_rule,
     use_kfac=True,
@@ -182,6 +196,5 @@ plot_training_validation(
     time_dict,
     metrics_dict,
     save_path="results/figures/mnist_binary_training_plot.png",
-    title_prefix="MNIST Binary (0 vs 1)"
+    title_prefix=f"MNIST Binary ({binary_classes[0]} vs {binary_classes[1]})"
 )
-
