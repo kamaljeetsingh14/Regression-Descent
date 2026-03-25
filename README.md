@@ -23,8 +23,6 @@ for understanding neural network optimization through the lens of statistical re
 
 - `src/` – Core code and implementation of the method
 - `scripts/` – Scripts for training, evaluation, and experiments
-- `data/` – Instructions or sample data for reproducing results
-- `results/` – Figures, tables, and outputs from experiments
 - `requirements.txt` – Python dependencies
 
 ## Usage
