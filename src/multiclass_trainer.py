@@ -2,19 +2,13 @@
 from ast import arguments
 import warnings
 from xml.parsers.expat import model
-warnings.filterwarnings(
-    "ignore", 
-    category=UserWarning, 
-    message="We've integrated functorch into PyTorch.*"
-)
+warnings.filterwarnings("ignore", category=UserWarning)
 
-# Core libraries
+
 import time
 from copy import deepcopy
 from itertools import tee
 from collections import deque
-
-# Numerical & ML libraries
 import numpy as np
 import torch
 import torch.nn as nn

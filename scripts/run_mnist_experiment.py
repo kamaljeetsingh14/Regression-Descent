@@ -1,3 +1,5 @@
+from unicodedata import name
+
 import torch
 import argparse
 from datetime import datetime
@@ -40,8 +42,6 @@ def get_args():
                         help="Learning rate for Adam")
 
     return parser.parse_args()
-
-
 # ---------------------------
 # Main
 # ---------------------------
