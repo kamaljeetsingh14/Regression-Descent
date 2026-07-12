@@ -1,5 +1,9 @@
 # Regression-Descent
-This repository contains the implementation and experimental code for the paper: Regression Descent: A Statistical Framework for Neural Network Optimization \[Paper Link](https://openreview.net/forum?id=MxWtUEoLSV)
+This repository contains the implementation and experimental code for the paper: Regression Descent: A Statistical Framework for Neural Network Optimization 
+
+[Download PDF](paper/Regression_Descent_AISTATS2026.pdf)
+
+[OpenReview Link](https://openreview.net/forum?id=MxWtUEoLSV)
 
 
 ## Abstract
